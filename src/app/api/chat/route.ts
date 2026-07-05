@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { demoDocument } from "@/lib/demo-data";
+import type { StudyDocument } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -11,8 +12,7 @@ interface IncomingMessage {
 
 /** Grounding context assembled from the document's processed content. In
  *  production this is replaced by top-k retrieval over the vector index. */
-function buildDocumentContext(): string {
-  const d = demoDocument;
+function buildDocumentContext(d: StudyDocument): string {
   return [
     `Title: ${d.title} (${d.pages} pages, ${d.language})`,
     "",
@@ -30,11 +30,13 @@ function buildDocumentContext(): string {
   ].join("\n");
 }
 
-const SYSTEM_PROMPT = `You are MindFlow AI, a study assistant. Answer questions using ONLY the document excerpts provided below. Cite the source page as (p. N) whenever you state a fact that has one. If the answer is not in the excerpts, say so plainly and suggest what section of the document might cover it — never invent content. Match the language of the user's question (e.g. answer in Arabic if asked in Arabic). Keep answers focused and readable.
+function buildSystemPrompt(d: StudyDocument): string {
+  return `You are MindFlow AI, a study assistant. Answer questions using ONLY the document excerpts provided below. Cite the source page as (p. N) whenever you state a fact that has one. If the answer is not in the excerpts, say so plainly and suggest what section of the document might cover it — never invent content. Match the language of the user's question (e.g. answer in Arabic if asked in Arabic). Keep answers focused and readable.
 
 <document>
-${buildDocumentContext()}
+${buildDocumentContext(d)}
 </document>`;
+}
 
 /** Fallback used when ANTHROPIC_API_KEY is not configured: streams a canned,
  *  document-grounded answer so the product remains fully demoable. */
@@ -72,10 +74,17 @@ function demoStream(question: string): ReadableStream<Uint8Array> {
 }
 
 export async function POST(req: Request) {
-  const { messages } = (await req.json()) as { messages: IncomingMessage[] };
+  const { messages, document } = (await req.json()) as {
+    messages: IncomingMessage[];
+    document?: StudyDocument;
+  };
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response("messages required", { status: 400 });
   }
+
+  // Uploaded documents send their processed content along; the demo document
+  // is the fallback so the workspace works before any upload.
+  const doc = document?.summarySections?.length ? document : demoDocument;
 
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
 
@@ -94,7 +103,7 @@ export async function POST(req: Request) {
     system: [
       {
         type: "text",
-        text: SYSTEM_PROMPT,
+        text: buildSystemPrompt(doc),
         cache_control: { type: "ephemeral" },
       },
     ],
