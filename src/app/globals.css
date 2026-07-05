@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe6fe;
+  --color-brand-200: #bfd3fe;
+  --color-brand-300: #93b4fd;
+  --color-brand-400: #608afa;
+  --color-brand-500: #3b63f6;
+  --color-brand-600: #2543eb;
+  --color-brand-700: #1d31d8;
+  --color-brand-800: #1e2baf;
+  --color-brand-900: #1e2a8a;
+  --color-brand-950: #171d54;
+
+  --color-accent-400: #22d3ee;
+  --color-accent-500: #06b6d4;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --animate-float: float 8s ease-in-out infinite;
+  --animate-float-slow: float 14s ease-in-out infinite;
+  --animate-shimmer: shimmer 2.2s linear infinite;
+  --animate-fade-up: fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-pulse-soft: pulse-soft 3s ease-in-out infinite;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0) translateX(0); }
+    50% { transform: translateY(-24px) translateX(12px); }
+  }
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+}
+
+:root {
+  --background: #fafbfe;
+  --foreground: #0b1020;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-strong: #ffffff;
+  --border-subtle: rgba(15, 23, 42, 0.08);
+}
+
+.dark {
+  --background: #070a14;
+  --foreground: #e7eaf3;
+  --surface: rgba(17, 22, 40, 0.66);
+  --surface-strong: #10152b;
+  --border-subtle: rgba(148, 163, 184, 0.14);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---- Reusable surfaces ---- */
+.glass {
+  background: var(--surface);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--border-subtle);
+}
+
+.card {
+  background: var(--surface-strong);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.25rem;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+.card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 44px -18px rgba(37, 67, 235, 0.28);
+  border-color: rgba(59, 99, 246, 0.35);
+}
+
+.gradient-text {
+  background: linear-gradient(112deg, #3b63f6 8%, #8b5cf6 48%, #06b6d4 92%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(120deg, #2543eb, #7c3aed);
+  box-shadow: 0 10px 30px -10px rgba(59, 99, 246, 0.65);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 14px 36px -10px rgba(124, 58, 237, 0.6);
+}
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+.btn-ghost:hover {
+  border-color: rgba(59, 99, 246, 0.45);
+  transform: translateY(-1px);
+}
+
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    rgba(148, 163, 184, 0.12) 40%,
+    rgba(148, 163, 184, 0.28) 50%,
+    rgba(148, 163, 184, 0.12) 60%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+  border-radius: 0.75rem;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.55);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* RTL fine-tuning */
+[dir="rtl"] .flip-x {
+  transform: scaleX(-1);
+}
+
+/* 3D flip for flashcards */
+.perspective-1200 { perspective: 1200px; }
+.preserve-3d { transform-style: preserve-3d; }
+.backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.rotate-y-180 { transform: rotateY(180deg); }
