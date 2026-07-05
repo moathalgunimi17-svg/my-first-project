@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   FileText,
   Sparkles,
@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { useApp } from "@/components/providers";
 import { demoDocument } from "@/lib/demo-data";
+import { getStoredDocument } from "@/lib/document-store";
+import type { StudyDocument } from "@/lib/types";
 import { Summary } from "@/components/workspace/summary";
 import { MindMap } from "@/components/workspace/mind-map";
 import { Flashcards } from "@/components/workspace/flashcards";
@@ -41,11 +43,20 @@ const exportFormats = ["PDF", "Word", "Markdown", "HTML", "JSON", "CSV", "Flashc
 function WorkspaceContent() {
   const { t } = useApp();
   const params = useSearchParams();
-  const doc = demoDocument;
+  const routeParams = useParams<{ id: string }>();
+  const [doc, setDoc] = useState<StudyDocument>(demoDocument);
   const [tab, setTab] = useState<TabId>((params.get("tab") as TabId) || "summary");
   const [exportOpen, setExportOpen] = useState(false);
 
-  const tabs: { id: TabId; label: string; icon: typeof Sparkles }[] = [
+  useEffect(() => {
+    // Uploaded documents live in localStorage (client-only), so they can
+    // only be resolved after mount; the demo document is the SSR fallback.
+    const stored = getStoredDocument(routeParams.id);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (stored) setDoc(stored);
+  }, [routeParams.id]);
+
+  const allTabs: { id: TabId; label: string; icon: typeof Sparkles }[] = [
     { id: "summary", label: t.tab_summary, icon: Sparkles },
     { id: "mindmap", label: t.tab_mindmap, icon: Network },
     { id: "flashcards", label: t.tab_flashcards, icon: Layers },
@@ -56,6 +67,17 @@ function WorkspaceContent() {
     { id: "tables", label: t.tab_tables, icon: Table2 },
     { id: "studio", label: t.tab_studio, icon: Wand2 },
   ];
+  const tabs = allTabs.filter(({ id }) => {
+    // Hide sections the document genuinely doesn't have (e.g. no
+    // chronological events → no timeline, no detected tables → no tables).
+    if (id === "timeline") return doc.timeline.length > 0;
+    if (id === "tables") return doc.tables.length > 0;
+    if (id === "flashcards") return doc.flashcards.length > 0;
+    if (id === "quiz") return doc.quiz.length > 0;
+    return true;
+  });
+
+  const activeTab: TabId = tabs.some((x) => x.id === tab) ? tab : "summary";
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -108,11 +130,11 @@ function WorkspaceContent() {
               key={id}
               onClick={() => setTab(id)}
               className={`relative flex shrink-0 items-center gap-2 px-4 py-3 text-sm font-medium transition ${
-                tab === id ? "text-brand-500" : "text-slate-500 hover:text-(--foreground)"
+                activeTab === id ? "text-brand-500" : "text-slate-500 hover:text-(--foreground)"
               }`}
             >
               <Icon className="size-4" /> {label}
-              {tab === id && (
+              {activeTab === id && (
                 <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-gradient-to-r from-brand-500 to-violet-500" />
               )}
             </button>
@@ -120,16 +142,16 @@ function WorkspaceContent() {
         </div>
       </div>
 
-      <div className="animate-fade-up py-8" key={tab}>
-        {tab === "summary" && <Summary doc={doc} />}
-        {tab === "mindmap" && <MindMap root={doc.mindMap} />}
-        {tab === "flashcards" && <Flashcards cards={doc.flashcards} />}
-        {tab === "quiz" && <Quiz questions={doc.quiz} />}
-        {tab === "chat" && <DocumentChat doc={doc} />}
-        {tab === "terms" && <KeyTerms terms={doc.terms} />}
-        {tab === "timeline" && <Timeline doc={doc} />}
-        {tab === "tables" && <ExtractedTables doc={doc} />}
-        {tab === "studio" && <AiStudio doc={doc} />}
+      <div className="animate-fade-up py-8" key={`${doc.id}-${activeTab}`}>
+        {activeTab === "summary" && <Summary doc={doc} />}
+        {activeTab === "mindmap" && <MindMap root={doc.mindMap} />}
+        {activeTab === "flashcards" && <Flashcards cards={doc.flashcards} />}
+        {activeTab === "quiz" && <Quiz questions={doc.quiz} />}
+        {activeTab === "chat" && <DocumentChat doc={doc} />}
+        {activeTab === "terms" && <KeyTerms terms={doc.terms} />}
+        {activeTab === "timeline" && <Timeline doc={doc} />}
+        {activeTab === "tables" && <ExtractedTables doc={doc} />}
+        {activeTab === "studio" && <AiStudio doc={doc} />}
       </div>
     </div>
   );

@@ -40,6 +40,7 @@ export function DocumentChat({ doc }: { doc: StudyDocument }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           documentId: doc.id,
+          document: doc,
           messages: [...messages, userMsg].map(({ role, content }) => ({ role, content })),
         }),
       });
