@@ -180,6 +180,45 @@ function buildMindMapTree(flat: FlatNode[]): MindMapNode {
   return root ?? { id: "root", label: "Document", color: "#3b63f6", children: [] };
 }
 
+async function generateWithClaude(rules: string, documentTurn: string): Promise<string> {
+  const client = new Anthropic();
+  const stream = client.messages.stream({
+    model: "claude-opus-4-8",
+    max_tokens: 24000,
+    thinking: { type: "adaptive" },
+    output_config: { format: { type: "json_schema", schema: artifactSchema } },
+    system: rules,
+    messages: [{ role: "user", content: documentTurn }],
+  });
+  const message = await stream.finalMessage();
+  return message.content.find((b) => b.type === "text")?.text ?? "{}";
+}
+
+/** Free-tier fallback: Google Gemini via REST (aistudio.google.com keys need
+ *  no billing). JSON mode + an explicit shape spec replaces the strict schema
+ *  used on the Claude path. */
+async function generateWithGemini(rules: string, documentTurn: string): Promise<string> {
+  const shapeSpec =
+    'Respond with a single JSON object exactly matching this TypeScript shape (no markdown, no extra keys): { "title": string, "language": string, "summarySections": {"heading": string, "content": string, "citation": {"page": number, "snippet": string}}[], "keyPoints": {"text": string, "citation": {"page": number, "snippet": string}}[], "flashcards": {"front": string, "back": string, "difficulty": "easy"|"medium"|"hard"}[], "quiz": {"type": "mcq"|"true_false"|"fill_blank", "difficulty": "easy"|"medium"|"hard", "question": string, "options": string[], "answerIndex": number, "answerText": string, "explanation": string}[], "terms": {"term": string, "definition": string, "kind": "concept"|"keyword"|"person"|"location"|"date"|"formula", "citation": {"page": number, "snippet": string}}[], "timeline": {"year": string, "title": string, "description": string}[], "mindmapNodes": {"id": string, "label": string, "color": string, "parentId": string}[] }';
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: `${rules}\n\n${shapeSpec}` }] },
+        contents: [{ role: "user", parts: [{ text: documentTurn }] }],
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 24576 },
+      }),
+    }
+  );
+  if (!res.ok) throw new Error(`gemini_${res.status}`);
+  const data = await res.json();
+  const parts: { text?: string }[] = data.candidates?.[0]?.content?.parts ?? [];
+  return parts.map((p) => p.text ?? "").join("") || "{}";
+}
+
 export async function POST(req: Request) {
   const form = await req.formData();
   const file = form.get("file");
@@ -223,14 +262,17 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const hasClaude = !!process.env.ANTHROPIC_API_KEY;
+  const hasGemini = !!process.env.GEMINI_API_KEY;
+
+  if (!hasClaude && !hasGemini) {
     return Response.json(
       {
         error: "missing_api_key",
         message:
           "Text was extracted successfully (" +
           cleanText.length.toLocaleString() +
-          " characters), but generating study material requires an ANTHROPIC_API_KEY. Add it to .env.local (or your Vercel project settings) and try again.",
+          " characters), but generating study material requires an AI key. Add ANTHROPIC_API_KEY, or a free GEMINI_API_KEY from aistudio.google.com, to .env.local (or your Vercel project settings) and try again.",
       },
       { status: 422 }
     );
@@ -239,26 +281,16 @@ export async function POST(req: Request) {
   const truncated = cleanText.length > MAX_CONTEXT_CHARS;
   const context = truncated ? cleanText.slice(0, MAX_CONTEXT_CHARS) : cleanText;
 
-  const client = new Anthropic();
-  const stream = client.messages.stream({
-    model: "claude-opus-4-8",
-    max_tokens: 24000,
-    thinking: { type: "adaptive" },
-    output_config: { format: { type: "json_schema", schema: artifactSchema } },
-    system:
-      "You are the MindFlow AI study-material generator. From the document text, produce: a clear title; the detected language name; 3-6 summary sections; 5-8 key points; 8-14 flashcards; 5-8 quiz questions (mix mcq/true_false/fill_blank — for non-mcq set options to the shown choices or [] and use answerIndex/answerText appropriately, with answerIndex -1 and answerText \"\" when unused); 6-12 key terms of varied kinds; a timeline ONLY if the document contains real chronological events (else []); and a mind map as flat nodes (one root with parentId \"\", 3-6 branches, depth ≤ 3, hex colors per branch). Citations: page = best-estimate page number, snippet = short verbatim quote from the text. Everything must come from the document — never invent content." +
-      (outputLanguage ? ` Write all generated text in ${outputLanguage}.` : " Write in the document's own language."),
-    messages: [
-      {
-        role: "user",
-        content: `<document pages="${extraction.pages}" truncated="${truncated}">\n${context}\n</document>`,
-      },
-    ],
-  });
+  const generationRules =
+    "You are the MindFlow AI study-material generator. From the document text, produce: a clear title; the detected language name; 3-6 summary sections; 5-8 key points; 8-14 flashcards; 5-8 quiz questions (mix mcq/true_false/fill_blank — for non-mcq set options to the shown choices or [] and use answerIndex/answerText appropriately, with answerIndex -1 and answerText \"\" when unused); 6-12 key terms of varied kinds; a timeline ONLY if the document contains real chronological events (else []); and a mind map as flat nodes (one root with parentId \"\", 3-6 branches, depth ≤ 3, hex colors per branch). Citations: page = best-estimate page number, snippet = short verbatim quote from the text. Everything must come from the document — never invent content." +
+    (outputLanguage ? ` Write all generated text in ${outputLanguage}.` : " Write in the document's own language.");
+  const documentTurn = `<document pages="${extraction.pages}" truncated="${truncated}">\n${context}\n</document>`;
 
-  let message;
+  let jsonText: string;
   try {
-    message = await stream.finalMessage();
+    jsonText = hasClaude
+      ? await generateWithClaude(generationRules, documentTurn)
+      : await generateWithGemini(generationRules, documentTurn);
   } catch {
     return Response.json(
       { error: "generation_failed", message: "The AI generation failed. Please try again." },
@@ -266,7 +298,6 @@ export async function POST(req: Request) {
     );
   }
 
-  const jsonText = message.content.find((b) => b.type === "text")?.text ?? "{}";
   let artifacts;
   try {
     artifacts = JSON.parse(jsonText);

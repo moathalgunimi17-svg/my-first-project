@@ -73,6 +73,62 @@ function demoStream(question: string): ReadableStream<Uint8Array> {
   });
 }
 
+/** Free-tier fallback: streams grounded answers from Google Gemini (keys
+ *  from aistudio.google.com require no billing). */
+async function geminiChatStream(
+  systemPrompt: string,
+  messages: IncomingMessage[]
+): Promise<ReadableStream<Uint8Array>> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: messages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }],
+        })),
+        generationConfig: { maxOutputTokens: 4096 },
+      }),
+    }
+  );
+  if (!res.ok || !res.body) throw new Error(`gemini_${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const chunk = JSON.parse(line.slice(6));
+          const parts: { text?: string }[] = chunk.candidates?.[0]?.content?.parts ?? [];
+          const text = parts.map((p) => p.text ?? "").join("");
+          if (text) controller.enqueue(encoder.encode(text));
+        } catch {
+          // Ignore keep-alives and partial frames.
+        }
+      }
+    },
+    cancel() {
+      reader.cancel();
+    },
+  });
+}
+
 export async function POST(req: Request) {
   const { messages, document } = (await req.json()) as {
     messages: IncomingMessage[];
@@ -89,6 +145,17 @@ export async function POST(req: Request) {
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
 
   if (!process.env.ANTHROPIC_API_KEY) {
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        return new Response(await geminiChatStream(buildSystemPrompt(doc), messages), {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      } catch {
+        return new Response("The AI service is unavailable right now. Please try again.", {
+          status: 502,
+        });
+      }
+    }
     return new Response(demoStream(lastUser?.content ?? ""), {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
